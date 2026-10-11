@@ -321,3 +321,43 @@ test("tela cheia respeita redução de movimento e seleção por teclado", async
   await expect(panel).toHaveCount(0);
   expect(await page.evaluate(() => document.fullscreenElement)).toBeNull();
 });
+
+test("tela cheia no celular mantém a peça abaixo do balão e reenquadra ao girar a tela", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await expect(page.getByText("Modelo interativo", { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.getByRole("button", { name: "Alternar tela cheia" }).click();
+  const panel = page.getByLabel("Detalhes do componente em tela cheia");
+  await panel.getByLabel("Selecionar componente em tela cheia").selectOption("water_level");
+  await expect(panel.getByRole("heading")).toHaveText("Nível de água");
+  const anchor = page.locator(".dt-callout-connector circle");
+  await expect
+    .poll(async () => {
+      const canvas = (await page.locator(".dt-canvas").boundingBox())!;
+      const card = (await panel.boundingBox())!;
+      return Number(await anchor.getAttribute("cy")) + canvas.y - card.y - card.height;
+    })
+    .toBeGreaterThan(24);
+  await page.screenshot({ path: "test-results/digital-twin-mobile-detail.png" });
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect
+    .poll(async () => {
+      const canvas = (await page.locator(".dt-canvas").boundingBox())!;
+      return Math.hypot(
+        Number(await anchor.getAttribute("cx")) - canvas.width / 2,
+        Number(await anchor.getAttribute("cy")) - canvas.height / 2,
+      );
+    })
+    .toBeLessThan(3);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+});

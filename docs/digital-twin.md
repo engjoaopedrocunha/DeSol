@@ -140,3 +140,37 @@ Não há porcentagem de saúde, limiar físico/sanitário presumido ou taxa de a
 - Aproximação automática no ciclo 360° (10/10/2026): o teste de tela cheia foi ampliado para verificar a centralização do primeiro componente e do seguinte após 12 segundos, mantendo o estado de apresentação e a rotação. A comparação visual do zoom manual foi preservada, usando capturas da página após a centralização em vez de repetir capturas do canvas em um polling; essa repetição havia excedido o limite com WebGL de software. Os dois testes de tela cheia, os 32 testes unitários, tipos, lint dos arquivos alterados e build passaram.
 
 - Ajuste de ângulo e enquadramento individual (10/10/2026): cada transição agora avalia 36 direções ao redor da peça, calcula o enquadramento da caixa completa e reduz a sobreposição do balão; mantém um zoom mais aberto do que o close manual. Os testes Vitest agora totalizam 34 e verificam a escolha do ângulo da peça alongada e o enquadramento no celular. O teste de tela cheia verifica o centro da peça após as aproximações automáticas, o close manual e a saída por Esc/botão. A saída pelo botão foi verificada novamente no teste focado de movimento reduzido.
+
+## Refinamento visual local do modelo r33
+
+O projeto Higgsfield solicitado não pôde ser editado nesta sessão: não havia ferramenta Higgsfield disponível e o acesso HTTPS ao domínio retornou bloqueio 403 no proxy de rede. As mudanças abaixo são uma camada de apresentação da aplicação sobre o GLB r33 versionado; o arquivo original e seu SHA-256 permanecem intactos. Nenhuma revisão nova foi gravada no Higgsfield.
+
+### Materiais e iluminação
+
+- Acabamentos PBR distintos para isolamento branco não metálico, alumínio escovado, borracha, células fotovoltaicas, calcita, vidro, reservatório translúcido e água. O material da carcaça havia sido exportado como metal; a camada web corrige essa classificação.
+- Cinco texturas procedurais determinísticas de 256 × 256 pixels, geradas localmente e compartilhadas entre materiais: microrrelevo, escovação, células solares, granulado mineral e ondulação discreta. UVs planares são adicionadas apenas às malhas que não as possuíam. Não há dependência de CDN de texturas ou serviço de renderização.
+- Vidro e água continuam transparentes. Os anéis geométricos de ondulação do export são ocultados em favor do microrrelevo da superfície.
+- Ambiente de reflexão, iluminação principal quente e preenchimento frio, sombras filtradas e piso de apoio. As luzes de estúdio exportadas são desativadas para evitar iluminação duplicada. O destaque de seleção é mais discreto e preserva o acabamento.
+- Mapa de sombra estático de 1024 pixels (512 em telas pequenas), pixel ratio limitado a 1,5 e renderização sob demanda. Rotação e interação continuam em tempo real no dispositivo. Texturas, materiais, geometria e mapa de sombras são descartados ao desmontar o visualizador.
+
+### Ajustes de montagem representada
+
+- A geometria local da calha já correspondia à parede +X do relatório, mas a matriz de objeto do GLB a girava para a parede frontal e esticava seu comprimento. A matriz é restaurada, mantendo a malha original de 0,186 × 1,236 m e alinhando-a aos suportes, tampas e dreno existentes.
+- Os dois pés do filtro são prolongados até o mesmo plano dos quatro pés da unidade; o topo dos apoios permanece junto ao filtro.
+- A espessura visual da junta IP65 é ajustada para preencher as duas folgas entre a caixa e a tampa.
+- Uma pequena sela de apoio é acrescentada entre o tubo superior e o piranômetro, onde existia uma fresta. Esse suporte é uma proposta visual, não uma peça confirmada no equipamento físico. O sensor conserva o papel e a interação existentes.
+- Os testes verificam a proximidade/interseção das caixas delimitadoras de 12 pares consecutivos de encaixes hidráulicos, com tolerância geométrica de 1 mm. Essa checagem detecta afastamentos grosseiros, mas não demonstra estanqueidade, circulação, cotas de fabricação, dimensionamento ou conectividade elétrica. As ligações reais de ESP32/LoRa, alimentação, pinagem e calibração ainda dependem do projeto do hardware.
+
+### Câmeras
+
+Cada um dos 12 componentes tem uma direção exterior preferencial, combinada com a avaliação de 36 candidatos e sete linhas de visibilidade por candidato. A câmera favorece vistas sem paredes opacas à frente da peça; superfícies transparentes não bloqueiam a seleção do ângulo. Sensores muito pequenos recebem uma distância mínima que mantém algum contexto do encaixe.
+
+Cabos remotos continuam visíveis, mas não deslocam o alvo da câmera da caixa eletrônica ou do conjunto fotovoltaico. O painel de detalhes tem espaço reservado no desktop; no celular, um deslocamento da projeção posiciona o componente abaixo do balão. Redimensionar a tela recalcula o enquadramento ativo. O ciclo de 12 segundos, redução de movimento, seleção manual, telemetria DEMO e relatórios são preservados.
+
+### Verificação desta alteração
+
+- 43 testes Vitest passaram, incluindo nove novos casos sobre o GLB real: calha, apoios, junta, caminho hidráulico, propriedades dos materiais e visibilidade externa dos quatro sensores.
+- Capturas em Chromium conferidas para visão geral, cobertura, sensor de nível, eletrônica, filtro e cuba/calha.
+- A qualidade final depende da geometria conceitual fornecida e da GPU do navegador. O modelo recebeu refinamento visual; não é um CAD validado nem uma renderização fotográfica calculada pelo Higgsfield.
+- TypeScript, lint dos arquivos alterados e build de produção passaram. Permanece o aviso existente sobre chunks de Three.js acima de 500 kB.
+- Seis testes Playwright passaram usando `CHROMIUM_PATH=/usr/bin/chromium`: recuperação de GLB 404, API offline, navegação móvel/teclado, apresentação de 12 segundos com clique e zoom, redução de movimento/saída de tela cheia e foco móvel abaixo do balão com reenquadramento ao mudar a orientação. Os demais casos da suíte E2E não foram repetidos nesta alteração.

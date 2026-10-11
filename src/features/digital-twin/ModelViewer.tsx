@@ -21,6 +21,8 @@ import {
 } from "./model";
 import { loadModelBytes } from "./model-loader";
 import { bestComponentFrame } from "./component-framing";
+import { correctModelAssembly, finishModelSurfaces } from "./model-finish";
+import { componentDirections, componentFocusBounds, componentVisibility } from "./component-view";
 import ComponentCallout, { type ViewerTelemetry } from "./ComponentCallout";
 import { nextPresentedComponent, presentationOrder, useComponentTour } from "./presentation";
 
@@ -74,7 +76,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
   };
   useEffect(() => {
     actions.current?.highlight(selected);
-    actions.current?.chooseSide(selected);
+    if (!fullscreen) actions.current?.chooseSide(selected);
   }, [selected, fullscreen]);
   useEffect(() => {
     if (touring) actions.current?.focus(selected, true);
@@ -139,6 +141,9 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 1;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
+      renderer.shadowMap.autoUpdate = false;
       container.appendChild(renderer.domElement);
       renderer.domElement.setAttribute(
         "aria-label",
@@ -152,16 +157,26 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
       room.dispose();
       pmrem.dispose();
       scene.environment = environment.texture;
-      scene.add(new THREE.HemisphereLight(0xffffff, 0x50647c, 1));
-      const keyLight = new THREE.DirectionalLight(0xffffff, 1.5);
-      keyLight.position.set(4, 7, 4);
+      scene.environmentIntensity = 0.65;
+      scene.add(new THREE.HemisphereLight(0xe8f1ff, 0x293645, 0.4));
+      const keyLight = new THREE.DirectionalLight(0xfff1df, 2);
+      keyLight.position.set(-3, 6, 4);
+      keyLight.castShadow = true;
+      keyLight.shadow.mapSize.setScalar(window.innerWidth < 600 ? 512 : 1024);
+      keyLight.shadow.normalBias = 0.006;
+      keyLight.shadow.bias = -0.0001;
+      keyLight.shadow.radius = 4;
+      keyLight.shadow.intensity = 0.65;
       scene.add(keyLight);
+      const rimLight = new THREE.DirectionalLight(0xb7d8ff, 0.9);
+      rimLight.position.set(3, 3, -4);
+      scene.add(rimLight);
       const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 1000);
       const orbit = new OrbitControls(camera, renderer.domElement);
       orbit.enableDamping = true;
       orbit.dampingFactor = 0.2;
       orbit.enablePan = false;
-      orbit.maxPolarAngle = Math.PI * 0.94;
+      orbit.maxPolarAngle = Math.PI * 0.49;
       orbit.autoRotateSpeed = 0.6;
       const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
       const motionChanged = () => {
@@ -172,6 +187,10 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
       };
       reducedMotion.addEventListener("change", motionChanged);
       let model: InstanceType<typeof THREE.Group> | undefined = undefined;
+      const stage = new THREE.Group();
+      scene.add(stage);
+      let disposeFinish: () => void = () => undefined;
+      let currentFocus: { id: ComponentId; presentation: boolean } | undefined;
       let frame = 0;
       let transition:
         | {
@@ -184,6 +203,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
           }
         | undefined;
       const stopMotion = () => {
+        currentFocus = undefined;
         transition = undefined;
         orbit.autoRotate = false;
         setRotating(false);
@@ -216,7 +236,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
             const copy = material.clone();
             if (copy instanceof THREE.MeshStandardMaterial) {
               copy.emissive.set("#23b8db");
-              copy.emissiveIntensity = 0.3;
+              copy.emissiveIntensity = 0.025;
             } else if (copy instanceof THREE.MeshBasicMaterial)
               copy.color.lerp(new THREE.Color("#23b8db"), 0.3);
             return copy;
@@ -233,6 +253,9 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         renderer.setSize(width, height);
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
+        if (model && currentFocus) focusComponent(currentFocus.id, currentFocus.presentation);
+        // Resizing clears the WebGL buffer, including when entering fullscreen.
+        if (model) renderer.render(scene, camera);
       };
       const observer = new ResizeObserver(resize);
       observer.observe(container);
@@ -323,6 +346,9 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         orbit.removeEventListener("start", stopMotion);
         orbit.dispose();
         if (model) disposeModel(model);
+        disposeModel(stage);
+        disposeFinish();
+        keyLight.shadow.dispose();
         environment.dispose();
         renderer.dispose();
         renderer.domElement.remove();
@@ -345,24 +371,39 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         objects: report.objectCount,
         mappedComponents: report.found,
       });
+      console.info("GLB r33: ajustes de apresentação", correctModelAssembly(model));
+      disposeFinish = finishModelSurfaces(
+        model,
+        Math.min(renderer.capabilities.getMaxAnisotropy(), 4),
+      );
       const bounds = new THREE.Box3().setFromObject(model);
       if (bounds.isEmpty()) throw new Error("O GLB não contém geometria visível.");
       const center = bounds.getCenter(new THREE.Vector3());
       model.position.sub(center);
       scene.add(model);
       const radius = Math.max(bounds.getBoundingSphere(new THREE.Sphere()).radius, 0.1);
+      const floor = new THREE.Mesh(
+        new THREE.PlaneGeometry(radius * 80, radius * 80),
+        new THREE.MeshStandardMaterial({ color: "#0d1520", roughness: 1 }),
+      );
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = bounds.min.y - center.y - 0.003;
+      floor.receiveShadow = true;
+      stage.add(floor);
+      scene.fog = new THREE.Fog("#141b24", radius * 5, radius * 18);
+      Object.assign(keyLight.shadow.camera, {
+        left: -radius,
+        right: radius,
+        top: radius,
+        bottom: -radius,
+        near: 0.1,
+        far: 20,
+      });
+      keyLight.shadow.camera.updateProjectionMatrix();
+      renderer.shadowMap.needsUpdate = true;
       orbit.minDistance = radius * 0.6;
       orbit.maxDistance = radius * 7;
-      const componentBounds = new Map<ComponentId, InstanceType<typeof THREE.Box3>>();
-      model.updateMatrixWorld(true);
-      model.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return;
-        const id = componentFromObject(object);
-        if (!id) return;
-        const box = componentBounds.get(id) ?? new THREE.Box3();
-        box.union(new THREE.Box3().setFromObject(object));
-        componentBounds.set(id, box);
-      });
+      const componentBounds = componentFocusBounds(model);
       setAvailable(presentationOrder.filter((id) => componentBounds.has(id)));
       const projected = new THREE.Vector3();
       const chooseSide = (id: ComponentId) => {
@@ -400,6 +441,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
       const focusComponent = (id: ComponentId, presentation = false) => {
         const box = componentBounds.get(id);
         if (!box) return;
+        currentFocus = { id, presentation };
         transition = undefined;
         orbit.autoRotate = false;
         if (!presentation) setRotating(false);
@@ -409,15 +451,30 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         const target = box.getCenter(new THREE.Vector3());
         const canvasRect = container.getBoundingClientRect();
         const calloutRect = callout.current?.getBoundingClientRect();
+        const panelWidth =
+          canvasRect.width <= 700
+            ? Math.min(300, canvasRect.width - 28)
+            : Math.min(presentation ? 340 : 420, canvasRect.width * (presentation ? 0.36 : 0.38));
+        if (canvasRect.width <= 700) {
+          const panelBottom = 64 + Math.min(canvasRect.height * 0.38, canvasRect.height - 180);
+          camera.setViewOffset(
+            canvasRect.width,
+            canvasRect.height,
+            0,
+            (78 - panelBottom) / 2,
+            canvasRect.width,
+            canvasRect.height,
+          );
+        } else camera.clearViewOffset();
         const frame = bestComponentFrame(
           box,
           camera.aspect,
           { width: canvasRect.width, height: canvasRect.height },
           calloutRect
             ? {
-                left: calloutRect.left - canvasRect.left,
+                left: canvasRect.width - panelWidth - 24,
                 top: calloutRect.top - canvasRect.top,
-                right: calloutRect.right - canvasRect.left,
+                right: canvasRect.width - 24,
                 bottom: calloutRect.bottom - canvasRect.top,
               }
             : {
@@ -426,6 +483,11 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
                 right: canvasRect.width,
                 bottom: canvasRect.height * 0.4,
               },
+          {
+            preferredDirection: componentDirections[id],
+            visibility: componentVisibility(model!, id, box),
+            minDistance: radius * 0.24,
+          },
         );
         setSide(frame.side);
         orbit.minDistance = radius * 0.04;
@@ -450,6 +512,8 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         needsRender = true;
       };
       const reset = () => {
+        currentFocus = undefined;
+        camera.clearViewOffset();
         transition = undefined;
         setFocused(false);
         orbit.minDistance = radius * 0.6;
@@ -478,6 +542,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         focus: focusComponent,
         chooseSide,
         move: (azimuth, polar) => {
+          currentFocus = undefined;
           transition = undefined;
           orbit.autoRotate = false;
           setRotating(false);
@@ -499,6 +564,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
           setRotating(orbit.autoRotate);
         },
         zoom: (factor) => {
+          currentFocus = undefined;
           transition = undefined;
           const offset = camera.position.clone().sub(orbit.target);
           offset.setLength(

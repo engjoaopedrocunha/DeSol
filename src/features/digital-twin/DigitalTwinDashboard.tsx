@@ -1,8 +1,9 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
   ArrowDownToLine,
+  ArrowUpRight,
   Box,
   ChevronDown,
   Clock3,
@@ -11,27 +12,30 @@ import {
   Info,
   Radio,
   RefreshCw,
-  ShieldQuestion,
+  SlidersHorizontal,
   Sun,
 } from "lucide-react";
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { AppShell } from "@/components/AppShell";
+import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Tooltip as Hint,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 import {
   calculateHealth,
-  demoRecords,
   filterRecords,
   formatTimestamp,
   formatValue,
-  healthLabels,
-  historyPoints,
   isSensor,
   latestBySensor,
   modelManifest,
@@ -45,6 +49,8 @@ import {
   type Reading,
   type SensorId,
 } from "./model";
+import { overviewDisplayState, sensorDisplayState } from "./dashboard-presentation";
+import { HistoryChart, Sparkline } from "./TelemetryCharts";
 import { useDigitalTelemetry } from "./use-telemetry";
 import type { SceneReport } from "./ModelViewer";
 import LegacyTelemetryPanel from "./LegacyTelemetryPanel";
@@ -56,141 +62,44 @@ const sensorIcons = {
   production_flow: Gauge,
   gateway: Radio,
 };
+const cardLabels = {
+  solar_irradiance: "Irradiância",
+  water_level: "Nível de água",
+  production_flow: "Vazão produzida",
+  gateway: "Conexão",
+};
 const qualityLabels = { good: "Boa", suspect: "Suspeita", bad: "Inválida", missing: "Ausente" };
-const timeFormat = (timestamp: number) =>
-  new Intl.DateTimeFormat("pt-BR", {
-    timeZone: "America/Cuiaba",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(timestamp));
-
-function HealthBadge({ health, demo }: { health: Health; demo: boolean }) {
+function SensorState({
+  health,
+  demo,
+  reading,
+}: {
+  health: Health;
+  demo: boolean;
+  reading?: Reading | undefined;
+}) {
+  const state = sensorDisplayState(health, demo, reading);
   return (
-    <span className={`dt-status dt-status-${demo ? "demo" : health}`}>
+    <span className={`dt-status dt-status-${demo ? "demo" : health} dt-state-${state.tone}`}>
       <span />
-      {demo ? "Simulação" : healthLabels[health]}
+      {state.label}
     </span>
   );
 }
-function HistoryChart({
-  id,
-  records,
-  interval,
-  demo,
-}: {
-  id: SensorId;
-  records: Reading[];
-  interval: number | undefined;
-  demo: boolean;
-}) {
-  const { points, gaps } = useMemo(
-    () => historyPoints(records, id, interval),
-    [records, id, interval],
-  );
-  const sensor = sensors[id];
-  const Icon = sensorIcons[id];
-  return (
-    <section className="dt-chart-card" aria-label={`Histórico de ${sensor.label}`}>
-      <header>
-        <div>
-          <Icon size={16} />
-          <h3>{sensor.label}</h3>
-        </div>
-        <span>{id === "gateway" ? "Estado de comunicação" : sensor.unit}</span>
-      </header>
-      <div
-        className="dt-chart-plot"
-        role="img"
-        aria-label={`${points.filter((p) => !p.gap).length} amostras de ${sensor.label}. ${gaps} intervalos sem dados. ${demo ? "Dados simulados." : "Dados reais disponíveis."}`}
-      >
-        {points.length ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={points} margin={{ top: 15, right: 16, left: 2, bottom: 8 }}>
-              <CartesianGrid stroke="var(--color-border)" vertical={false} />
-              <XAxis
-                dataKey="timestamp"
-                type="number"
-                domain={["dataMin", "dataMax"]}
-                tickFormatter={timeFormat}
-                stroke="var(--color-muted-foreground)"
-                fontSize={11}
-                minTickGap={35}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                width={id === "gateway" ? 88 : 50}
-                domain={id === "gateway" ? [-0.1, 1.1] : ["auto", "auto"]}
-                {...(id === "gateway"
-                  ? {
-                      ticks: [0, 1],
-                      tickFormatter: (v: number) => (v === 1 ? "Conectado" : "Offline"),
-                    }
-                  : {})}
-                stroke="var(--color-muted-foreground)"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: "#202a36",
-                  border: "1px solid #344050",
-                  borderRadius: 12,
-                  color: "#fff",
-                  fontSize: 12,
-                }}
-                labelFormatter={(v) => formatTimestamp(Number(v))}
-                formatter={(v) => [
-                  id === "gateway"
-                    ? Number(v) === 1
-                      ? "Conectado"
-                      : "Desconectado"
-                    : `${v} ${sensor.unit}`,
-                  demo ? "Simulação" : "Leitura",
-                ]}
-              />
-              <Line
-                type={id === "gateway" ? "stepAfter" : "linear"}
-                dataKey="value"
-                stroke={id === "gateway" ? "var(--color-primary)" : "var(--color-water)"}
-                strokeWidth={2.5}
-                dot={{ r: 3 }}
-                activeDot={{ r: 5 }}
-                connectNulls={false}
-                isAnimationActive={false}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="dt-empty">
-            <Clock3 size={22} />
-            <span>Sem registros nesse período</span>
-          </div>
-        )}
-      </div>
-      <footer>
-        {demo ? "Série de referência · dados simulados" : "Somente registros recebidos"}
-        <span>
-          {gaps
-            ? `${gaps} intervalo(s) sem dados`
-            : points.length < 2
-              ? "Amostras insuficientes para uma série"
-              : interval
-                ? "Sem lacunas detectadas"
-                : "Cadência não configurada"}
-        </span>
-      </footer>
-    </section>
-  );
-}
-
 export default function DigitalTwinDashboard() {
   const [selected, setSelected] = useState<ComponentId>("solar_irradiance");
   const [scene, setScene] = useState<SceneReport | null>(null);
   const [reportSensor, setReportSensor] = useState<SensorId | "all">("all");
   const [fromInput, setFromInput] = useState("");
   const [toInput, setToInput] = useState("");
+  const drawerTrigger = useRef<HTMLElement | null>(null);
+  const [drawer, setDrawer] = useState<"detail" | "history" | "diagnostics" | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const isMobile = useIsMobile();
+  const showDrawer = (view: "detail" | "history" | "diagnostics") => {
+    setDrawer(view);
+    setDrawerOpen(true);
+  };
   const [showLegacy, setShowLegacy] = useState(false);
   const from = fromInput ? `${fromInput}:00Z` : "";
   const to = toInput ? `${toInput}:00Z` : "";
@@ -244,443 +153,572 @@ export default function DigitalTwinDashboard() {
     setToInput(new Date(anchor).toISOString().slice(0, 16));
   };
 
+  const overview = overviewDisplayState({
+    mode: telemetry.mode,
+    disconnected: telemetry.connection === "disconnected",
+    scenario: telemetry.demoScenario,
+    health: sensorIds.map(health),
+  });
+  const openDetail = (id: ComponentId) => {
+    setSelected(id);
+    if (isSensor(id)) setReportSensor(id);
+    showDrawer("detail");
+  };
+  const recentAnchor = demo ? (lastTimestamp ?? telemetry.now) : telemetry.now;
+  const recentHistory = filterRecords(
+    telemetry.history,
+    "all",
+    recentAnchor - 86_400_000,
+    recentAnchor,
+  );
+  const selectedLabel = isSensor(selected) ? sensors[selected].label : parts[selected].label;
+  const demoExplanation =
+    "Dados simulados — sem telemetria real. A demonstração não confirma a instalação ou a saúde física do equipamento.";
   return (
     <AppShell
       title="Gêmeo digital"
-      subtitle="Explore o dessalinizador solar e acompanhe suas leituras."
-      statusBar={
-        <div className="dt-shell-status">
-          <Box size={14} /> DeSol · Dessalinização solar <span>Modelo r33</span>
-        </div>
+      statusBar={null}
+      titleAccessory={
+        <TooltipProvider delayDuration={200}>
+          <Hint>
+            <TooltipTrigger asChild>
+              <button
+                className="dt-mode-chip"
+                aria-label={
+                  demo ? "DEMO: informações sobre os dados simulados" : "Origem da telemetria"
+                }
+                onClick={() => showDrawer("diagnostics")}
+              >
+                {demo ? "DEMO" : telemetry.mode === "checking" ? "CONECTANDO" : "API REAL"}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="dt-mode-tooltip">
+              {demo
+                ? demoExplanation
+                : "Consulte a origem e a qualidade das leituras em Diagnóstico."}
+            </TooltipContent>
+          </Hint>
+        </TooltipProvider>
+      }
+      headerActions={
+        <span className="dt-header-time">
+          <Clock3 size={14} /> Última leitura <time>{formatTimestamp(lastTimestamp)}</time>
+        </span>
       }
     >
-      <div className="dt-dashboard">
-        <div className={`dt-mode-banner ${demo ? "dt-mode-demo" : ""}`} role="status">
+      <div className="dt-dashboard dt-overview">
+        <section
+          className={`dt-overall dt-state-${overview.tone}`}
+          aria-label="Estado geral"
+          aria-live="polite"
+        >
           <div>
-            <span className="dt-mode-tag">
-              {demo ? "DEMO" : telemetry.mode === "checking" ? "CONFIGURAÇÃO" : "API REAL"}
-            </span>
-            <div>
-              <strong>
-                {demo
-                  ? "Dados simulados — sem telemetria real"
-                  : telemetry.mode === "checking"
-                    ? "Verificando a configuração de telemetria"
-                    : "Telemetria por API · instalação física a confirmar"}
-              </strong>
-              <p>
-                {demo
-                  ? "Explore o modelo e os relatórios sem conectar dispositivos."
-                  : telemetry.connection === "ready"
-                    ? "Leituras validadas. A saúde depende da confirmação do hardware e do intervalo de amostragem."
-                    : "A visualização 3D continua disponível durante a conexão."}
-              </p>
-            </div>
+            <span className="dt-eyebrow">Dessalinizador solar</span>
+            <h2>
+              <span className="dt-overall-dot" />
+              {overview.label}
+            </h2>
+            <p>{overview.description}</p>
           </div>
-          <span className="dt-reading-time">
-            <Clock3 size={14} /> Última leitura: {formatTimestamp(lastTimestamp)}
-          </span>
-        </div>
+          <div className="dt-daily-production">
+            <span>Produção de água hoje</span>
+            <strong>
+              — <small>L</small>
+            </strong>
+            <p>Acumulado diário não disponível</p>
+          </div>
+        </section>
         {telemetry.error && (
           <div className="dt-api-error" role="alert">
             <AlertTriangle size={18} />
-            <p>{telemetry.error}</p>
+            <p>API indisponível. As leituras disponíveis podem estar desatualizadas.</p>
             <button onClick={telemetry.retry}>
-              <RefreshCw size={14} /> Reconectar
+              <RefreshCw size={14} />
+              Reconectar
             </button>
             <button onClick={telemetry.showDemo}>Explorar DEMO</button>
           </div>
         )}
         {demo && telemetry.config?.mode === "real" && (
           <button className="dt-button mb-4" onClick={telemetry.retry}>
-            <RefreshCw size={14} /> Retomar API real
+            <RefreshCw size={14} />
+            Retomar API real
           </button>
         )}
-        <div className="dt-explorer-grid">
-          <div>
-            <Suspense
-              fallback={<div className="dt-viewer dt-empty">Preparando visualizador 3D…</div>}
-            >
-              <ModelViewer
-                selected={selected}
-                onSelect={setSelected}
-                onInspect={setScene}
-                telemetry={{
-                  readings: latest,
-                  health: Object.fromEntries(sensorIds.map((id) => [id, health(id)])) as Record<
-                    SensorId,
-                    Health
-                  >,
-                  mode: telemetry.mode,
-                  error: telemetry.error,
-                }}
-              />
-            </Suspense>
-            <div className="dt-model-meta">
-              <span>
-                <Box size={13} /> GLB local · revisão 33
-              </span>
-              <span>
-                {scene
-                  ? `${scene.objectCount} objetos · ${scene.found.filter(isSensor).length}/4 papéis de sensor encontrados`
-                  : "Aguardando inspeção da cena"}
-              </span>
-            </div>
-            {scene && scene.missingNames.length > 0 && (
-              <p className="dt-binding-warning">
-                <AlertTriangle size={14} /> {scene.missingNames.length} nomes esperados não
-                encontrados no arquivo. Consulte o console; a seleção pelo menu permanece
-                disponível.
-              </p>
-            )}
-          </div>
-          <aside className="dt-inspector" aria-label="Sensores e peça selecionada">
-            <div className="dt-section-heading">
-              <h2>Sensores do equipamento</h2>
-              <span>04</span>
-            </div>
-            <div className="dt-sensor-menu">
-              {sensorIds.map((id) => {
-                const Icon = sensorIcons[id];
-                return (
-                  <button
-                    key={id}
-                    onClick={() => setSelected(id)}
-                    aria-pressed={selected === id}
-                    className={selected === id ? "is-selected" : ""}
-                  >
-                    <Icon size={16} />
-                    <span>{sensors[id].shortLabel}</span>
-                    <span className="dt-selection-dot" />
-                  </button>
-                );
-              })}
-            </div>
-            <div className="dt-selected-panel" aria-live="polite">
-              <span className="dt-eyebrow">
-                {isSensor(selected) ? "Sensor selecionado" : "Componente selecionado"}
-              </span>
-              <h3>{isSensor(selected) ? sensors[selected].label : parts[selected].label}</h3>
-              {isSensor(selected) && (
-                <>
-                  <div className="dt-detail-value">
-                    {formatValue(current)}
-                    <small>{selected === "gateway" ? "" : sensors[selected].unit}</small>
-                  </div>
-                  <HealthBadge health={health(selected)} demo={demo} />
-                  <dl className="dt-reading-details">
-                    <div>
-                      <dt>Última amostra</dt>
-                      <dd>{formatTimestamp(current?.timestamp)}</dd>
-                    </div>
-                    <div>
-                      <dt>Qualidade</dt>
-                      <dd>{current ? qualityLabels[current.quality] : "Sem dados"}</dd>
-                    </div>
-                    <div>
-                      <dt>Origem</dt>
-                      <dd>
-                        {current?.source === "demo"
-                          ? "Simulada"
-                          : current?.source === "real"
-                            ? "API real"
-                            : "Não disponível"}
-                      </dd>
-                    </div>
-                    {current?.batteryPct != null && (
-                      <div>
-                        <dt>Bateria</dt>
-                        <dd>{current.batteryPct}%</dd>
-                      </div>
-                    )}
-                    {current?.rssiDbm != null && (
-                      <div>
-                        <dt>RSSI</dt>
-                        <dd>{current.rssiDbm} dBm</dd>
-                      </div>
-                    )}
-                    {current?.diagnosticCode && (
-                      <div>
-                        <dt>Diagnóstico</dt>
-                        <dd>{current.diagnosticCode}</dd>
-                      </div>
-                    )}
-                  </dl>
-                </>
-              )}
-              <p>
-                {isSensor(selected) ? sensors[selected].description : parts[selected].description}
-              </p>
-              <div className="dt-binding-status">
-                <Info size={13} />
-                {scene
-                  ? scene.found.includes(selected)
-                    ? "Peça encontrada no GLB e vinculada à seleção."
-                    : "Peça não encontrada neste GLB; vínculo 3D indisponível."
-                  : "O vínculo será verificado após carregar o modelo."}
-              </div>
-              {isSensor(selected) && (
-                <button
-                  className="dt-text-button"
-                  onClick={() => {
-                    setReportSensor(selected);
-                    document.getElementById("dt-reports")?.scrollIntoView({
-                      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-                        ? "instant"
-                        : "smooth",
-                      block: "start",
-                    });
-                  }}
-                >
-                  Ver histórico deste sensor ↓
-                </button>
-              )}
-            </div>
-            <details className="dt-components">
-              <summary>
-                Explorar componentes <ChevronDown size={15} />
-              </summary>
-              <div>
-                {Object.entries(parts).map(([id, part]) => (
-                  <button
-                    key={id}
-                    onClick={() => setSelected(id as ComponentId)}
-                    aria-pressed={selected === id}
-                  >
-                    {part.label}
-                  </button>
-                ))}
-              </div>
-            </details>
-          </aside>
-        </div>
-        {demo && (
-          <label className="dt-demo-controls">
-            Cenário de demonstração
-            <select
-              aria-label="Cenário de demonstração"
-              value={telemetry.demoScenario}
-              onChange={(event) => telemetry.setDemoScenario(event.target.value as DemoScenario)}
-            >
-              <option value="nominal">Leituras de referência</option>
-              <option value="gateway-offline">Simular gateway offline</option>
-              <option value="bad-reading">Simular leitura inválida</option>
-            </select>
-            <span>Os cenários não alteram dados reais.</span>
-          </label>
-        )}
-        <div className="dt-metrics">
+        <div className="dt-metrics" aria-label="Sensores do equipamento">
           {sensorIds.map((id) => {
             const Icon = sensorIcons[id];
-            const reading = latest[id];
+            const state = sensorDisplayState(health(id), demo, latest[id]);
             return (
               <button
                 key={id}
-                className={`dt-metric-card ${selected === id ? "is-selected" : ""}`}
-                onClick={() => setSelected(id)}
+                className={`dt-metric-card dt-state-${state.tone} ${selected === id ? "is-selected" : ""}`}
+                onClick={() => openDetail(id)}
+                aria-label={`Detalhes de ${cardLabels[id]}`}
                 aria-pressed={selected === id}
+                aria-haspopup="dialog"
               >
                 <div className="dt-metric-heading">
-                  <span>{sensors[id].shortLabel}</span>
-                  <Icon size={18} />
+                  <span>
+                    <Icon size={16} />
+                    {cardLabels[id]}
+                  </span>
+                  <ArrowUpRight size={14} />
                 </div>
                 <div className={`dt-metric-value ${id === "gateway" ? "dt-gateway-value" : ""}`}>
-                  {formatValue(reading)} {id !== "gateway" && <small>{sensors[id].unit}</small>}
+                  {formatValue(latest[id])} {id !== "gateway" && <small>{sensors[id].unit}</small>}
                 </div>
-                <HealthBadge health={health(id)} demo={demo} />
-                {reading?.quality === "bad" && (
-                  <span className="dt-invalid-reading">
-                    Leitura inválida{demo ? " · simulação" : ""}
-                  </span>
-                )}
+                <Sparkline id={id} records={recentHistory} interval={demo ? 900 : interval} />
+                <SensorState health={health(id)} demo={demo} reading={latest[id]} />
               </button>
             );
           })}
         </div>
-        <div className="dt-health-note">
-          <ShieldQuestion size={19} />
-          <p>
-            {demo
-              ? "A demonstração não confirma sensores instalados, comunicação LoRa, estado de saúde ou potabilidade da água."
-              : !interval
-                ? "Intervalo esperado não configurado. A idade das leituras é exibida, mas a saúde não pode ser confirmada."
-                : telemetry.summary?.hardwareConfirmed
-                  ? "Saúde calculada pela idade, qualidade e diagnóstico das leituras. Não há limites sanitários ou alarmes físicos presumidos."
-                  : "A instalação do hardware ainda não foi confirmada pelo backend. Não há percentual de saúde presumido."}
-          </p>
-        </div>
-        <section id="dt-reports" className="dt-reports" aria-labelledby="dt-reports-title">
-          <div className="dt-reports-heading">
+        <section className="dt-model-section" aria-label="Explorar equipamento">
+          <div className="dt-model-heading">
             <div>
-              <span className="dt-eyebrow">Telemetria e relatórios</span>
-              <h2 id="dt-reports-title">Histórico de leituras</h2>
-              <p>
-                {demo
-                  ? "Amostras do pacote de demonstração de 09/10/2026."
-                  : "Registros recebidos pela API; os filtros consultam o período solicitado."}{" "}
-                Horários em Cuiabá (UTC−4).
-              </p>
+              <h2>Explore o equipamento</h2>
+              <p>Selecione um sensor ou toque em uma peça para ver os detalhes.</p>
             </div>
-            <button
-              className="dt-button dt-button-primary"
-              onClick={exportCsv}
-              disabled={!filtered.length || rangeInvalid}
-            >
-              <ArrowDownToLine size={16} /> Exportar CSV <span>({filtered.length})</span>
-            </button>
-          </div>
-          <div className="dt-report-filters">
-            <label>
-              Sensor
+            <label className="dt-part-picker">
+              <span className="sr-only">Explorar componentes</span>
               <select
-                aria-label="Filtrar por sensor"
-                value={reportSensor}
-                onChange={(event) => setReportSensor(event.target.value as SensorId | "all")}
+                aria-label="Explorar componentes"
+                value={selected}
+                onChange={(event) => openDetail(event.target.value as ComponentId)}
               >
-                <option value="all">Todos os sensores</option>
-                {sensorIds.map((id) => (
-                  <option key={id} value={id}>
-                    {sensors[id].label}
-                  </option>
-                ))}
+                <optgroup label="Sensores">
+                  {sensorIds.map((id) => (
+                    <option key={id} value={id}>
+                      {sensors[id].label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Componentes">
+                  {Object.entries(parts).map(([id, part]) => (
+                    <option key={id} value={id}>
+                      {part.label}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </label>
-            <label>
-              De (UTC)
-              <input
-                aria-label="Início do período em UTC"
-                type="datetime-local"
-                value={fromInput}
-                onChange={(event) => setFromInput(event.target.value)}
-              />
-            </label>
-            <label>
-              Até (UTC)
-              <input
-                aria-label="Fim do período em UTC"
-                type="datetime-local"
-                value={toInput}
-                onChange={(event) => setToInput(event.target.value)}
-              />
-            </label>
-            <div className="dt-range-presets">
-              <button onClick={() => preset(1)}>1 h</button>
-              <button onClick={() => preset(24)}>24 h</button>
-              <button
-                onClick={() => {
-                  setFromInput("");
-                  setToInput("");
-                }}
-              >
-                Limpar período
-              </button>
-            </div>
           </div>
-          {rangeInvalid && (
-            <p role="alert" className="dt-binding-warning">
-              A data inicial deve ser anterior à data final.
-            </p>
-          )}
-          <div className="dt-history-grid">
-            {sensorIds
-              .filter((id) => reportSensor === "all" || id === reportSensor)
-              .map((id) => (
-                <HistoryChart
-                  key={id}
-                  id={id}
-                  records={filtered}
-                  interval={demo ? 900 : interval}
-                  demo={demo}
-                />
-              ))}
-          </div>
-          <details className="dt-records">
-            <summary>
-              Consultar registros disponíveis <span>{filtered.length} registros</span>
-            </summary>
-            <div className="dt-table-scroll">
-              <table>
-                <caption className="sr-only">
-                  Registros filtrados de telemetria, com horário, sensor, unidade, qualidade e
-                  origem.
-                </caption>
-                <thead>
-                  <tr>
-                    <th>Data · Cuiabá</th>
-                    <th>Sensor</th>
-                    <th>Valor</th>
-                    <th>Qualidade</th>
-                    <th>Origem</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filtered.map((r, i) => (
-                    <tr key={`${r.sensorId}-${r.timestamp}-${i}`}>
-                      <td>{formatTimestamp(r.timestamp)}</td>
-                      <td>{sensors[r.sensorId].shortLabel}</td>
-                      <td>
-                        {formatValue(r)} {r.unit !== "boolean" ? r.unit : ""}
-                      </td>
-                      <td>{qualityLabels[r.quality]}</td>
-                      <td>{r.source === "demo" ? "Simulada" : "Real"}</td>
-                    </tr>
-                  ))}
-                  {!filtered.length && (
-                    <tr>
-                      <td colSpan={5}>Nenhum registro disponível nesse período.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </details>
+          <Suspense
+            fallback={<div className="dt-viewer dt-empty">Preparando visualizador 3D…</div>}
+          >
+            <ModelViewer
+              selected={selected}
+              onSelect={setSelected}
+              onActivate={openDetail}
+              onInspect={setScene}
+              telemetry={{
+                readings: latest,
+                health: Object.fromEntries(sensorIds.map((id) => [id, health(id)])) as Record<
+                  SensorId,
+                  Health
+                >,
+                mode: telemetry.mode,
+                error: telemetry.error,
+              }}
+            />
+          </Suspense>
         </section>
-        <section className="dt-events" aria-labelledby="dt-events-title">
-          <div className="dt-section-heading">
-            <h2 id="dt-events-title">Eventos e alertas</h2>
-            <span>{events.length}</span>
-          </div>
-          {events.length ? (
-            <ul>
-              {events.map((event) => (
-                <li key={event.id}>
-                  <span className={`dt-event-icon dt-event-${event.severity}`}>
-                    {event.severity === "info" ? <Info size={17} /> : <AlertTriangle size={17} />}
-                  </span>
-                  <div>
-                    <p>{event.message}</p>
+        <nav className="dt-secondary-actions" aria-label="Consultas do equipamento">
+          <button
+            onClick={() => {
+              setReportSensor("all");
+              showDrawer("history");
+            }}
+          >
+            <Clock3 size={15} />
+            Histórico e exportação
+          </button>
+          <button onClick={() => showDrawer("diagnostics")}>
+            <SlidersHorizontal size={15} />
+            Diagnóstico
+          </button>
+        </nav>
+      </div>
+      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <SheetContent
+          side={isMobile ? "bottom" : "right"}
+          className={`dt-dashboard dt-drawer ${drawer === "detail" && !isSensor(selected) ? "dt-drawer-compact" : ""}`}
+          overlayClassName="dt-drawer-overlay"
+          onOpenAutoFocus={() => {
+            drawerTrigger.current =
+              document.activeElement instanceof HTMLElement &&
+              document.activeElement !== document.body
+                ? document.activeElement
+                : document.querySelector<HTMLElement>(".dt-metric-card.is-selected, .dt-canvas");
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            drawerTrigger.current?.focus({ preventScroll: true });
+          }}
+        >
+          <SheetHeader className="dt-drawer-header">
+            <span className="dt-eyebrow">DeSol · {demo ? "Dados simulados" : "Telemetria"}</span>
+            <SheetTitle>
+              {drawer === "diagnostics"
+                ? "Diagnóstico"
+                : drawer === "history"
+                  ? "Histórico e exportação"
+                  : selectedLabel}
+            </SheetTitle>
+            <SheetDescription
+              className={drawer === "detail" && !isSensor(selected) ? "sr-only" : ""}
+            >
+              {drawer === "diagnostics"
+                ? "Informações técnicas, origem dos dados e configuração da demonstração."
+                : drawer === "history"
+                  ? "Consulte as leituras recebidas e exporte os registros disponíveis."
+                  : isSensor(selected)
+                    ? "Leitura atual, histórico e informações deste sensor."
+                    : "Informações deste componente."}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="dt-drawer-body">
+            {drawer === "detail" && (
+              <div className="dt-selected-panel">
+                {isSensor(selected) && (
+                  <>
+                    <div className="dt-detail-value">
+                      {formatValue(current)}
+                      <small>{selected === "gateway" ? "" : sensors[selected].unit}</small>
+                    </div>
+                    <SensorState health={health(selected)} demo={demo} reading={current} />
+                    <HistoryChart
+                      id={selected}
+                      records={filtered}
+                      interval={demo ? 900 : interval}
+                      demo={demo}
+                    />
+                    <dl className="dt-reading-details">
+                      <div>
+                        <dt>Última amostra</dt>
+                        <dd>{formatTimestamp(current?.timestamp)}</dd>
+                      </div>
+                      <div>
+                        <dt>Qualidade</dt>
+                        <dd>{current ? qualityLabels[current.quality] : "Sem dados"}</dd>
+                      </div>
+                      <div>
+                        <dt>Origem</dt>
+                        <dd>
+                          {current?.source === "demo"
+                            ? "Simulada"
+                            : current?.source === "real"
+                              ? "API real"
+                              : "Não disponível"}
+                        </dd>
+                      </div>
+                      {current?.batteryPct != null && (
+                        <div>
+                          <dt>Bateria</dt>
+                          <dd>{current.batteryPct}%</dd>
+                        </div>
+                      )}
+                      {current?.rssiDbm != null && (
+                        <div>
+                          <dt>RSSI</dt>
+                          <dd>{current.rssiDbm} dBm</dd>
+                        </div>
+                      )}
+                      {current?.diagnosticCode && (
+                        <div>
+                          <dt>Diagnóstico</dt>
+                          <dd>{current.diagnosticCode}</dd>
+                        </div>
+                      )}
+                    </dl>
+                  </>
+                )}
+                <p>
+                  {isSensor(selected) ? sensors[selected].description : parts[selected].description}
+                </p>
+                {!isSensor(selected) && (
+                  <p>Este componente não possui medição dedicada configurada.</p>
+                )}
+              </div>
+            )}
+            {(drawer === "history" || (drawer === "detail" && isSensor(selected))) && (
+              <>
+                <section id="dt-reports" className="dt-reports" aria-labelledby="dt-reports-title">
+                  <div className="dt-reports-heading">
+                    <div>
+                      <span className="dt-eyebrow">Telemetria e relatórios</span>
+                      <h2 id="dt-reports-title">Histórico de leituras</h2>
+                      <p>
+                        {demo
+                          ? "Amostras do pacote de demonstração de 09/10/2026."
+                          : "Registros recebidos pela API; os filtros consultam o período solicitado."}{" "}
+                        Horários em Cuiabá (UTC−4).
+                      </p>
+                    </div>
+                    <button
+                      className="dt-button dt-button-primary"
+                      onClick={exportCsv}
+                      disabled={!filtered.length || rangeInvalid}
+                    >
+                      <ArrowDownToLine size={16} /> Exportar CSV <span>({filtered.length})</span>
+                    </button>
+                  </div>
+                  <div className="dt-report-filters">
+                    {drawer === "history" && (
+                      <label>
+                        Sensor
+                        <select
+                          aria-label="Filtrar por sensor"
+                          value={reportSensor}
+                          onChange={(event) =>
+                            setReportSensor(event.target.value as SensorId | "all")
+                          }
+                        >
+                          <option value="all">Todos os sensores</option>
+                          {sensorIds.map((id) => (
+                            <option key={id} value={id}>
+                              {sensors[id].label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <label>
+                      De (UTC)
+                      <input
+                        aria-label="Início do período em UTC"
+                        type="datetime-local"
+                        value={fromInput}
+                        onChange={(event) => setFromInput(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Até (UTC)
+                      <input
+                        aria-label="Fim do período em UTC"
+                        type="datetime-local"
+                        value={toInput}
+                        onChange={(event) => setToInput(event.target.value)}
+                      />
+                    </label>
+                    <div className="dt-range-presets">
+                      <button onClick={() => preset(1)}>1 h</button>
+                      <button onClick={() => preset(24)}>24 h</button>
+                      <button
+                        onClick={() => {
+                          setFromInput("");
+                          setToInput("");
+                        }}
+                      >
+                        Limpar período
+                      </button>
+                    </div>
+                  </div>
+                  {rangeInvalid && (
+                    <p role="alert" className="dt-binding-warning">
+                      A data inicial deve ser anterior à data final.
+                    </p>
+                  )}
+                  {drawer === "history" && (
+                    <div className="dt-history-grid">
+                      {sensorIds
+                        .filter((id) => reportSensor === "all" || id === reportSensor)
+                        .map((id) => (
+                          <HistoryChart
+                            key={id}
+                            id={id}
+                            records={filtered}
+                            interval={demo ? 900 : interval}
+                            demo={demo}
+                          />
+                        ))}
+                    </div>
+                  )}
+                  <details className="dt-records">
+                    <summary>
+                      Consultar registros disponíveis <span>{filtered.length} registros</span>
+                    </summary>
+                    <div className="dt-table-scroll">
+                      <table>
+                        <caption className="sr-only">
+                          Registros filtrados de telemetria, com horário, sensor, unidade, qualidade
+                          e origem.
+                        </caption>
+                        <thead>
+                          <tr>
+                            <th>Data · Cuiabá</th>
+                            <th>Sensor</th>
+                            <th>Valor</th>
+                            <th>Qualidade</th>
+                            <th>Origem</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filtered.map((r, i) => (
+                            <tr key={`${r.sensorId}-${r.timestamp}-${i}`}>
+                              <td>{formatTimestamp(r.timestamp)}</td>
+                              <td>{sensors[r.sensorId].shortLabel}</td>
+                              <td>
+                                {formatValue(r)} {r.unit !== "boolean" ? r.unit : ""}
+                              </td>
+                              <td>{qualityLabels[r.quality]}</td>
+                              <td>{r.source === "demo" ? "Simulada" : "Real"}</td>
+                            </tr>
+                          ))}
+                          {!filtered.length && (
+                            <tr>
+                              <td colSpan={5}>Nenhum registro disponível nesse período.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                </section>
+                <section className="dt-events" aria-labelledby="dt-events-title">
+                  <div className="dt-section-heading">
+                    <h2 id="dt-events-title">Eventos e alertas</h2>
+                    <span>{events.length}</span>
+                  </div>
+                  {events.length ? (
+                    <ul>
+                      {events.map((event) => (
+                        <li key={event.id}>
+                          <span className={`dt-event-icon dt-event-${event.severity}`}>
+                            {event.severity === "info" ? (
+                              <Info size={17} />
+                            ) : (
+                              <AlertTriangle size={17} />
+                            )}
+                          </span>
+                          <div>
+                            <p>{event.message}</p>
+                            <span>
+                              {formatTimestamp(event.timestamp)} ·{" "}
+                              {event.source === "demo"
+                                ? "Evento de demonstração"
+                                : "Evento recebido do backend"}
+                              {event.sensorId ? ` · ${sensors[event.sensorId].shortLabel}` : ""}
+                            </span>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="dt-empty">
+                      Nenhum evento recebido no período. Isso não confirma ausência de falhas no
+                      hardware.
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+            {drawer === "diagnostics" && (
+              <div className="dt-diagnostics">
+                <section>
+                  <h2>Modelo e vínculos</h2>
+                  <div className="dt-model-meta">
                     <span>
-                      {formatTimestamp(event.timestamp)} ·{" "}
-                      {event.source === "demo"
-                        ? "Evento de demonstração"
-                        : "Evento recebido do backend"}
-                      {event.sensorId ? ` · ${sensors[event.sensorId].shortLabel}` : ""}
+                      <Box size={14} />
+                      GLB local · revisão {modelManifest.revision}
+                    </span>
+                    <span>
+                      {scene
+                        ? `${scene.objectCount} objetos · ${scene.found.filter(isSensor).length}/4 papéis de sensor encontrados`
+                        : "Aguardando inspeção da cena"}
                     </span>
                   </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="dt-empty">
-              Nenhum evento recebido no período. Isso não confirma ausência de falhas no hardware.
-            </div>
-          )}
-        </section>
-        <details
-          className="dt-legacy"
-          onToggle={(event) => setShowLegacy(event.currentTarget.open)}
-        >
-          <summary>
-            <Activity size={16} /> Painel anterior · métricas complementares{" "}
-            <ChevronDown size={15} />
-          </summary>
-          {showLegacy && <LegacyTelemetryPanel />}
-        </details>
-        <footer className="dt-page-footer">
-          <span>DeSol · Gêmeo digital · revisão {modelManifest.revision}</span>
-          <span>Dimensões conceituais; não utilizar como cotas de fabricação.</span>
-        </footer>
-      </div>
+                  {scene && scene.missingNames.length > 0 && (
+                    <p className="dt-binding-warning">
+                      <AlertTriangle size={14} />
+                      {scene.missingNames.length} nomes esperados não encontrados no arquivo.
+                    </p>
+                  )}
+                  <p>Dimensões conceituais; não utilizar como cotas de fabricação.</p>
+                </section>
+                {telemetry.error && (
+                  <section>
+                    <h2>Conexão com a API</h2>
+                    <p>{telemetry.error}</p>
+                  </section>
+                )}
+                <section>
+                  <h2>Origem e qualidade</h2>
+                  <p>
+                    {demo
+                      ? demoExplanation
+                      : !interval
+                        ? "Intervalo esperado não configurado. A saúde não pode ser confirmada."
+                        : telemetry.summary?.hardwareConfirmed
+                          ? "Saúde calculada pela idade, qualidade e diagnóstico das leituras. Não confirma potabilidade ou funcionamento hidráulico completo."
+                          : "A instalação do hardware ainda não foi confirmada pelo backend."}
+                  </p>
+                  <dl className="dt-reading-details">
+                    {sensorIds.map((id) => (
+                      <div key={id}>
+                        <dt>{cardLabels[id]}</dt>
+                        <dd>
+                          {latest[id] ? qualityLabels[latest[id].quality] : "Sem dados"} ·{" "}
+                          {latest[id]?.source === "demo"
+                            ? "Simulada"
+                            : latest[id]?.source === "real"
+                              ? "API real"
+                              : "Origem indisponível"}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                </section>
+                <section>
+                  <h2>Sobre a produção diária</h2>
+                  <p>
+                    O contrato atual fornece vazão em L/h, mas não o volume acumulado do dia. O
+                    painel mantém esse total indisponível, sem transformar leituras pontuais em
+                    litros produzidos.
+                  </p>
+                </section>
+                {demo && (
+                  <label className="dt-demo-controls">
+                    Cenário de demonstração
+                    <select
+                      aria-label="Cenário de demonstração"
+                      value={telemetry.demoScenario}
+                      onChange={(event) =>
+                        telemetry.setDemoScenario(event.target.value as DemoScenario)
+                      }
+                    >
+                      <option value="nominal">Leituras de referência</option>
+                      <option value="gateway-offline">Simular gateway offline</option>
+                      <option value="bad-reading">Simular leitura inválida</option>
+                    </select>
+                    <span>Os cenários não alteram dados reais.</span>
+                  </label>
+                )}
+                <details
+                  className="dt-legacy"
+                  onToggle={(event) => setShowLegacy(event.currentTarget.open)}
+                >
+                  <summary>
+                    <Activity size={16} />
+                    Painel anterior · métricas complementares
+                    <ChevronDown size={15} />
+                  </summary>
+                  {showLegacy && <LegacyTelemetryPanel />}
+                </details>
+              </div>
+            )}
+          </div>
+          <footer className="dt-drawer-footer">
+            <SheetClose asChild>
+              <button className="dt-button">
+                <ChevronDown size={16} />
+                Voltar ao painel
+              </button>
+            </SheetClose>
+          </footer>
+        </SheetContent>
+      </Sheet>
     </AppShell>
   );
 }

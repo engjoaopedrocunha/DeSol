@@ -64,4 +64,30 @@ describe("enquadramento individual dos componentes", () => {
           expect(Math.abs(projected.y)).toBeLessThan(1);
         }
   });
+  it.each([
+    [320, 210],
+    [390, 245],
+    [558, 166],
+  ])("preserva o contexto de um sensor pequeno no canvas %dx%d", (width, height) => {
+    const bounds = new Box3(new Vector3(-0.02, -0.02, -0.02), new Vector3(0.02, 0.02, 0.02));
+    const frame = bestComponentFrame(
+      bounds,
+      width / height,
+      { width, height },
+      { left: width, right: width, top: 0, bottom: 0 },
+      { minDistance: 1.4 },
+    );
+    expect(frame.distance).toBeGreaterThan(1.35);
+    const camera = new PerspectiveCamera(40, width / height, 0.01, 100);
+    camera.position.copy(frame.direction).multiplyScalar(frame.distance);
+    camera.lookAt(0, 0, 0);
+    camera.updateMatrixWorld(true);
+    for (const x of [bounds.min.x, bounds.max.x])
+      for (const y of [bounds.min.y, bounds.max.y])
+        for (const z of [bounds.min.z, bounds.max.z]) {
+          const point = new Vector3(x, y, z).project(camera);
+          expect(Math.abs(point.x)).toBeLessThan(0.8);
+          expect(Math.abs(point.y)).toBeLessThan(0.8);
+        }
+  });
 });

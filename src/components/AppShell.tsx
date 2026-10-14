@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
-import { Activity, Brain, Map, Bell } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Activity, Brain, Map, Bell, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import logo from "@/assets/desol-logo.svg";
 
 const nav = [
@@ -32,50 +32,80 @@ export function AppShell({
   subtitle,
   children,
   statusBar,
+  titleAccessory,
+  headerActions,
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
   statusBar?: ReactNode;
+  titleAccessory?: ReactNode;
+  headerActions?: ReactNode;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
   return (
     <div className="min-h-screen md:flex">
-      <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col border-r px-4 py-6 md:flex">
+      <aside
+        className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r px-3 py-6 md:flex ${collapsed ? "w-20" : "w-60"}`}
+      >
+        <button
+          className="mb-6 flex h-10 items-center justify-center self-end rounded-lg px-2 text-muted-foreground hover:bg-card hover:text-foreground"
+          onClick={() => setCollapsed((value) => !value)}
+          aria-label={collapsed ? "Expandir menu" : "Recolher menu"}
+          aria-expanded={!collapsed}
+          aria-controls="desktop-navigation"
+        >
+          {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+        </button>
         <div className="mb-8 flex items-center gap-3 px-2">
           <img src={logo} alt="DeSol" className="h-9 w-9" />
-          <div className="leading-tight">
+          <div className={collapsed ? "sr-only" : "leading-tight"}>
             <div className="text-sm font-semibold">DeSol</div>
             <div className="text-[11px] text-muted-foreground">Telemetria Hídrica</div>
           </div>
         </div>
-        <nav className="flex flex-col gap-1">
+        <nav
+          id="desktop-navigation"
+          aria-label="Navegação principal"
+          className="flex flex-col gap-1"
+        >
           {nav.map(({ to, label, icon: Icon }) => (
             <Link
               key={to}
               to={to}
               activeOptions={{ exact: true }}
+              aria-label={label}
+              title={collapsed ? label : undefined}
               className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted-foreground transition-colors hover:bg-card hover:text-foreground"
               activeProps={{
                 className: "bg-card !text-foreground font-medium [&>svg]:text-primary",
               }}
             >
-              <Icon className="h-[18px] w-[18px]" />
-              {label}
+              <Icon className="h-[18px] w-[18px] shrink-0" />
+              <span className={collapsed ? "sr-only" : ""}>{label}</span>
             </Link>
           ))}
         </nav>
       </aside>
 
-      <main className="flex-1 px-5 pb-28 pt-6 md:px-10 md:pb-12 md:pt-10">
+      <main className="min-w-0 flex-1 px-4 pb-28 pt-6 md:px-10 md:pb-12 md:pt-10">
         <div className="mx-auto max-w-6xl">
           <div className="mb-2 flex items-center gap-2 md:hidden">
             <img src={logo} alt="DeSol" className="h-7 w-7" />
             <span className="text-sm font-semibold">DeSol</span>
           </div>
-          {statusBar ?? <StatusBar />}
-          <h1 className="mt-4 text-[34px] font-bold leading-tight tracking-tight">{title}</h1>
+          {statusBar === undefined ? <StatusBar /> : statusBar}
+          <header className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-[28px] md:text-[34px] font-bold leading-tight tracking-tight">
+                {title}
+              </h1>
+              {titleAccessory}
+            </div>
+            {headerActions}
+          </header>
           {subtitle && <p className="mt-1 text-muted-foreground">{subtitle}</p>}
-          <div className="mt-8">{children}</div>
+          <div className="mt-5 md:mt-8">{children}</div>
         </div>
       </main>
 

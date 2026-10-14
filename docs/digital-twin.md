@@ -174,3 +174,44 @@ Cabos remotos continuam visíveis, mas não deslocam o alvo da câmera da caixa 
 - A qualidade final depende da geometria conceitual fornecida e da GPU do navegador. O modelo recebeu refinamento visual; não é um CAD validado nem uma renderização fotográfica calculada pelo Higgsfield.
 - TypeScript, lint dos arquivos alterados e build de produção passaram. Permanece o aviso existente sobre chunks de Three.js acima de 500 kB.
 - Seis testes Playwright passaram usando `CHROMIUM_PATH=/usr/bin/chromium`: recuperação de GLB 404, API offline, navegação móvel/teclado, apresentação de 12 segundos com clique e zoom, redução de movimento/saída de tela cheia e foco móvel abaixo do balão com reenquadramento ao mudar a orientação. Os demais casos da suíte E2E não foram repetidos nesta alteração.
+
+## Responsividade em smartphones (14/10/2026)
+
+O visualizador em telas pequenas separa cabeçalho, canvas e controles em linhas próprias. A altura acompanha a área visível do navegador (`svh`), e a câmera enquadra os limites do modelo dentro do canvas disponível, recalculando a visão geral ou a peça selecionada após redimensionamento.
+
+Na apresentação expandida em telas compactas, as abas “Modelo 3D” e “Detalhes” separam a cena do texto longo. O modo Modelo mantém apenas a seleção de componente e um resumo da leitura; o modo Detalhes oferece rolagem própria. Na horizontal, o seletor compacto ocupa uma coluna lateral, preservando a altura do canvas. Os controles de toque têm pelo menos 44 × 44 pixels e os seletores usam fonte de 16 pixels.
+
+Em telas compactas, o botão de expansão usa diretamente um modo compatível dentro da página, sem solicitar fullscreen nativo. Um portal com contêiner estável move o visualizador para o corpo do documento e o devolve ao local original ao fechar, preservando o canvas/WebGL e escapando de ancestrais com transformação, contenção ou corte. A altura segue `visualViewport.height`, com fallback para `innerHeight`; as margens de segurança do dispositivo são respeitadas. O botão de fechar, o controle de expansão e Esc restauram foco e rolagem.
+
+A abertura compacta mostra o equipamento inteiro, sem apresentação/zoom automáticos. A aproximação manual mantém mais contexto do sensor. O desktop conserva a apresentação de 12 segundos e fullscreen nativo quando disponível.
+
+A cobertura móvel verifica 320, 390 e 430 pixels de largura com altura de apenas 525 pixels, as duas orientações, troca entre modelo e detalhes, preservação do mesmo canvas, áreas de toque e um ancestral transformado com `contain: paint`. Um caso adicional reduz a altura a 450 pixels e verifica a atualização da área visível. Os testes usam Chromium e não substituem validação em Safari/iPhone físico.
+
+Validação desta alteração: 43 testes Vitest, checagem de tipos, lint dos arquivos TypeScript alterados e build de produção aprovados. Sete testes Playwright focados passaram na versão final: teclado/redução de movimento, arraste por toque, apresentação automática e seleção no desktop, três larguras móveis nas duas orientações e alternativa sem fullscreen nativo. A suíte E2E completa não foi repetida.
+
+## Painel operacional enxuto (14/10/2026)
+
+A página principal apresenta cabeçalho com badge de origem e última leitura, resumo de estado, quatro cards com valor e histórico compacto de até 24 horas e, abaixo, o modelo GLB existente. A seleção é compartilhada entre cards e malhas; a ativação manual abre uma gaveta com o gráfico maior, qualidade, origem, registros e exportação CSV. A apresentação automática em fullscreen atualiza a seleção sem abrir a gaveta operacional.
+
+O antigo painel fixo de sensores foi substituído pela gaveta. Revisão do GLB, contagem de objetos, vínculos, explicações sobre saúde e controles de cenários DEMO ficam em Diagnóstico. Histórico de todos os sensores e exportação continuam disponíveis sob demanda. O menu lateral pode ser recolhido, mantendo os nomes acessíveis dos links.
+
+O backend, o contrato, as fixtures, o polling, a validação, os filtros e o cálculo de saúde permanecem os mesmos. O status geral resume os quatro estados existentes: normalidade exige quatro leituras `ok`; dados atrasados, ausência de confirmação ou API indisponível exigem atenção; erro de leitura ou comunicação offline são destacados. No modo DEMO, normalidade física não é afirmada e as exceções são explicitamente simuladas. As sparklines preservam lacunas e mostram um ponto quando há somente uma amostra, sem inventar tendências.
+
+“Produção de água hoje” aparece como indisponível porque o contrato fornece vazão em L/h, sem volume diário acumulado. Não há integração estimada, conversão de vazão pontual em volume nem reutilização de métricas legadas com unidades diferentes.
+
+Validação do redesenho: 47 testes Vitest, tipos, lint dos arquivos alterados e build de produção aprovados. Os 14 cenários Playwright foram verificados: 12 passaram na execução geral; seleção de malhas/rotação/reset e filtros/CSV passaram nas repetições isoladas após separar a exportação do teste gráfico e aguardar o fechamento das gavetas. A validação móvel inclui 320, 390 e 430 pixels, as duas orientações, toque, teclado, movimento reduzido e ausência de fullscreen nativo. Não houve publicação nem ensaio em iPhone físico.
+
+
+### Modo expandido compatível
+
+O painel longo simultâneo à cena foi substituído pelas abas compactas após revisar a captura enviada. A cena inicial permanece em visão geral; a leitura detalhada ocupa sua própria área. Foram acrescentados três testes unitários de enquadramento de sensores pequenos em canvases baixos. Tipos, lint e build aprovados; 50 testes Vitest passaram. A cobertura E2E desta revisão inclui o modo compatível e as regressões de toque, teclado, diagnóstico e fullscreen no desktop.
+
+Validação final do modo compatível: 50 testes unitários e nove cenários E2E focados aprovados, incluindo apresentação automática nativa no desktop, seleção por teclado/movimento reduzido, toque, diagnóstico, três larguras compactas nas duas orientações e contêiner transformado com redução de altura a 450 pixels. Tipos, lint, formatação e build aprovados. A suíte E2E completa não foi repetida nesta revisão.
+
+### Legendas proporcionais ao conteúdo
+
+As informações de componentes sem medição dedicada abrem em um cartão com altura automática: no celular, junto à borda inferior; no desktop, no canto inferior direito. O painel fotovoltaico deixa de ocupar a altura inteira da tela. O fundo permanece parcialmente visível e o cabeçalho não repete a introdução genérica do histórico.
+
+Sensores, histórico e diagnóstico usam uma área de conteúdo com rolagem própria. Cabeçalho com botão de fechar e rodapé “Voltar ao painel” permanecem fora dessa rolagem; no celular, o painel fica limitado a 78% da altura da tela. Também é possível sair por Esc ou toque fora. O conteúdo é preservado durante a animação de saída para evitar mudanças bruscas de tamanho, e o foco retorna ao controle de origem.
+
+Validação: tipos, lint, formatação, build e 50 testes unitários aprovados. Seis cenários E2E focados aprovados: legendas em 440 × 956 e 320 × 568, legenda curta no desktop, teclado móvel, diagnóstico e filtros/CSV. Os testes verificam tamanho limitado, botão de retorno de pelo menos 44 pixels, fechamento por botão/X/toque fora/Esc e controles de saída visíveis após rolar um painel longo.

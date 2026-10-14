@@ -80,7 +80,7 @@ export function bestComponentFrame(
       const side = leftPenalty < rightPenalty ? "left" : "right";
       const panelPenalty = Math.min(leftPenalty, rightPenalty);
       // Reserve the panel's real width on desktop, including the enlarged detail card.
-      // Portrait uses a vertical view offset in the viewer so the part sits below it.
+      // Docked phone details live outside the canvas and have no overlay rectangle.
       if (viewport.width > 700 && maxY > panel.bottom && minY < panel.top) {
         const leftEdge = onRight ? -panel.left : panel.right;
         const rightEdge = onRight ? panel.left : -panel.right;

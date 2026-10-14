@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Box,
   ChevronLeft,
@@ -10,9 +11,12 @@ import {
   Rotate3D,
   ZoomIn,
   ZoomOut,
+  X,
 } from "lucide-react";
 import {
   componentFromObject,
+  formatValue,
+  healthLabels,
   inspectSceneNames,
   isSensor,
   parts,
@@ -25,6 +29,8 @@ import { correctModelAssembly, finishModelSurfaces } from "./model-finish";
 import { componentDirections, componentFocusBounds, componentVisibility } from "./component-view";
 import ComponentCallout, { type ViewerTelemetry } from "./ComponentCallout";
 import { nextPresentedComponent, presentationOrder, useComponentTour } from "./presentation";
+
+const COMPACT_VIEWER_QUERY = "(max-width: 767px), (max-width: 1000px) and (max-height: 500px)";
 
 export type SceneReport = ReturnType<typeof inspectSceneNames>;
 type Controls = {
@@ -39,11 +45,24 @@ type Controls = {
 type Props = {
   selected: ComponentId;
   onSelect: (id: ComponentId) => void;
+  onActivate?: (id: ComponentId) => void;
   onInspect: (report: SceneReport | null) => void;
   telemetry: ViewerTelemetry;
 };
-export default function ModelViewer({ selected, onSelect, onInspect, telemetry }: Props) {
+export default function ModelViewer({
+  selected,
+  onSelect,
+  onActivate,
+  onInspect,
+  telemetry,
+}: Props) {
+  const mountPoint = useRef<HTMLDivElement>(null);
+  const [mount, setMount] = useState<HTMLDivElement | null>(null);
   const viewer = useRef<HTMLElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const [compact, setCompact] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const callout = useRef<HTMLDivElement>(null);
   const connector = useRef<SVGSVGElement>(null);
   const leader = useRef<SVGPolylineElement>(null);
@@ -55,8 +74,8 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
   const [fullscreenError, setFullscreenError] = useState("");
   const host = useRef<HTMLDivElement>(null);
   const actions = useRef<Controls | undefined>(undefined);
-  const callbacks = useRef({ selected, onSelect, onInspect, fullscreen });
-  callbacks.current = { selected, onSelect, onInspect, fullscreen };
+  const callbacks = useRef({ selected, onSelect, onActivate, onInspect, fullscreen });
+  callbacks.current = { selected, onSelect, onActivate, onInspect, fullscreen };
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [message, setMessage] = useState("");
   const [retry, setRetry] = useState(0);
@@ -64,7 +83,66 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
   const [hovered, setHovered] = useState<ComponentId | null>(null);
   const [reference, setReference] = useState<"exterior" | "basin">("exterior");
 
-  const touring = fullscreen && rotating && status === "ready";
+  const touring = fullscreen && rotating && status === "ready" && !detailsOpen;
+  const closeExpanded = async () => {
+    try {
+      if (document.fullscreenElement === viewer.current) await document.exitFullscreen();
+      setFullscreen(false);
+      setDetailsOpen(false);
+      actions.current?.reset();
+    } catch {
+      setFullscreenError("Não foi possível sair da tela cheia. Tente novamente.");
+    }
+  };
+  useLayoutEffect(() => {
+    const element = document.createElement("div");
+    element.className = "dt-dashboard dt-viewer-mount";
+    setMount(element);
+    return () => element.remove();
+  }, []);
+  useLayoutEffect(() => {
+    if (!mount || !mountPoint.current) return;
+    // Keep the renderer mounted while escaping transformed/clipped preview containers.
+    if (fullscreen && document.fullscreenElement !== viewer.current) {
+      if (!mountPoint.current.style.height)
+        mountPoint.current.style.height = `${mount.getBoundingClientRect().height}px`;
+      if (mount.parentElement !== document.body) document.body.appendChild(mount);
+    } else {
+      if (mount.parentElement !== mountPoint.current) mountPoint.current.appendChild(mount);
+      mountPoint.current.style.height = "";
+    }
+  }, [mount, fullscreen]);
+  useEffect(() => {
+    const media = window.matchMedia(COMPACT_VIEWER_QUERY);
+    const changed = () => setCompact(media.matches);
+    changed();
+    media.addEventListener("change", changed);
+    return () => media.removeEventListener("change", changed);
+  }, []);
+  useEffect(() => {
+    if (!fullscreen) return;
+    const element = viewer.current;
+    const previouslyFocused = returnFocus.current ?? document.activeElement;
+    closeButton.current?.focus({ preventScroll: true });
+    const syncViewport = () =>
+      element?.style.setProperty(
+        "--dt-expanded-height",
+        `${window.visualViewport?.height ?? window.innerHeight}px`,
+      );
+    syncViewport();
+    window.addEventListener("resize", syncViewport);
+    window.visualViewport?.addEventListener("resize", syncViewport);
+    return () => {
+      window.removeEventListener("resize", syncViewport);
+      window.visualViewport?.removeEventListener("resize", syncViewport);
+      element?.style.removeProperty("--dt-expanded-height");
+      if (previouslyFocused instanceof HTMLElement)
+        previouslyFocused.focus({ preventScroll: true });
+    };
+  }, [fullscreen]);
+  useEffect(() => {
+    if (fullscreen && detailsOpen) actions.current?.focus(selected);
+  }, [fullscreen, detailsOpen, selected]);
   const remaining = useComponentTour({ enabled: touring, selected, available, onSelect });
   const nextComponent = () => {
     const next = nextPresentedComponent(selected, available);
@@ -82,15 +160,52 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
     if (touring) actions.current?.focus(selected, true);
   }, [selected, touring]);
   useEffect(() => {
+    if (!fullscreen) return;
+    const previousOverflow = document.body.style.overflow;
+    const previousRootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.documentElement.style.overflow = previousRootOverflow;
+    };
+  }, [fullscreen]);
+  useEffect(() => {
     const changed = () => {
       const entered = document.fullscreenElement === viewer.current;
       setFullscreen(entered);
       setFocused(false);
-      if (entered) actions.current?.rotate(true);
+      if (entered) actions.current?.rotate(!window.matchMedia(COMPACT_VIEWER_QUERY).matches);
       else actions.current?.reset();
     };
     const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && document.fullscreenElement === viewer.current) {
+      if (event.key === "Tab" && callbacks.current.fullscreen && viewer.current) {
+        const elements = [
+          ...viewer.current.querySelectorAll<HTMLElement>(
+            "button:not(:disabled), select, [tabindex='0']",
+          ),
+        ].filter(
+          (element) =>
+            element.getBoundingClientRect().height > 0 &&
+            getComputedStyle(element).visibility !== "hidden",
+        );
+        const first = elements[0],
+          last = elements.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+      if (event.key === "Escape" && callbacks.current.fullscreen) {
+        if (!document.fullscreenElement) {
+          setFullscreen(false);
+          setDetailsOpen(false);
+          actions.current?.reset();
+          return;
+        }
         void document
           .exitFullscreen()
           .catch(() => setFullscreenError("Use o botão de tela cheia para sair da apresentação."));
@@ -105,7 +220,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
   }, []);
   useEffect(() => {
     const container = host.current;
-    if (!container) return;
+    if (!mount || !container) return;
     let disposed = false;
     let cleanup: (() => void) | undefined;
     const controller = new AbortController();
@@ -235,10 +350,10 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
           const temporary = (Array.isArray(original) ? original : [original]).map((material) => {
             const copy = material.clone();
             if (copy instanceof THREE.MeshStandardMaterial) {
-              copy.emissive.set("#23b8db");
+              copy.emissive.set("#e5ee6c");
               copy.emissiveIntensity = 0.025;
             } else if (copy instanceof THREE.MeshBasicMaterial)
-              copy.color.lerp(new THREE.Color("#23b8db"), 0.3);
+              copy.color.lerp(new THREE.Color("#e5ee6c"), 0.3);
             return copy;
           });
           highlighted.push({ mesh: object, original, temporary });
@@ -253,7 +368,10 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         renderer.setSize(width, height);
         camera.aspect = width / height;
         camera.updateProjectionMatrix();
-        if (model && currentFocus) focusComponent(currentFocus.id, currentFocus.presentation);
+        if (model) {
+          if (currentFocus) focusComponent(currentFocus.id, currentFocus.presentation);
+          else reset();
+        }
         // Resizing clears the WebGL buffer, including when entering fullscreen.
         if (model) renderer.render(scene, camera);
       };
@@ -294,6 +412,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         if (hit) {
           callbacks.current.onSelect(hit);
           if (callbacks.current.fullscreen) focusComponent(hit);
+          else callbacks.current.onActivate?.(hit);
         }
       };
       const pointerLeave = () => {
@@ -450,27 +569,20 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         orbit.enableDamping = true;
         const target = box.getCenter(new THREE.Vector3());
         const canvasRect = container.getBoundingClientRect();
+        if (!canvasRect.width || !canvasRect.height) return;
         const calloutRect = callout.current?.getBoundingClientRect();
-        const panelWidth =
-          canvasRect.width <= 700
-            ? Math.min(300, canvasRect.width - 28)
-            : Math.min(presentation ? 340 : 420, canvasRect.width * (presentation ? 0.36 : 0.38));
-        if (canvasRect.width <= 700) {
-          const panelBottom = 64 + Math.min(canvasRect.height * 0.38, canvasRect.height - 180);
-          camera.setViewOffset(
-            canvasRect.width,
-            canvasRect.height,
-            0,
-            (78 - panelBottom) / 2,
-            canvasRect.width,
-            canvasRect.height,
-          );
-        } else camera.clearViewOffset();
+        const docked =
+          getComputedStyle(viewer.current!).getPropertyValue("--dt-docked").trim() === "1";
+        const panelWidth = Math.min(
+          presentation ? 340 : 420,
+          canvasRect.width * (presentation ? 0.36 : 0.38),
+        );
+        camera.clearViewOffset();
         const frame = bestComponentFrame(
           box,
           camera.aspect,
           { width: canvasRect.width, height: canvasRect.height },
-          calloutRect
+          calloutRect && !docked
             ? {
                 left: canvasRect.width - panelWidth - 24,
                 top: calloutRect.top - canvasRect.top,
@@ -486,7 +598,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
           {
             preferredDirection: componentDirections[id],
             visibility: componentVisibility(model!, id, box),
-            minDistance: radius * 0.24,
+            minDistance: radius * (docked ? 0.7 : 0.24),
           },
         );
         setSide(frame.side);
@@ -530,6 +642,27 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         camera.near = radius / 100;
         camera.far = radius * 100;
         camera.updateProjectionMatrix();
+        // Fit the actual canvas on phones; headers and tools have their own rows.
+        if (
+          window.matchMedia("(max-width: 767px), (max-width: 1000px) and (max-height: 500px)")
+            .matches
+        ) {
+          const direction = camera.position.clone().normalize();
+          for (let attempt = 0; attempt < 3; attempt++) {
+            camera.lookAt(0, 0, 0);
+            camera.updateMatrixWorld();
+            let extent = 0;
+            const bounds = new THREE.Box3().setFromObject(model!);
+            for (const x of [bounds.min.x, bounds.max.x])
+              for (const y of [bounds.min.y, bounds.max.y])
+                for (const z of [bounds.min.z, bounds.max.z]) {
+                  const point = new THREE.Vector3(x, y, z).project(camera);
+                  extent = Math.max(extent, Math.abs(point.x), Math.abs(point.y));
+                }
+            const fittedDistance = (camera.position.length() * extent) / 0.82;
+            camera.position.copy(direction).multiplyScalar(fittedDistance);
+          }
+        }
         orbit.target.set(0, 0, 0);
         orbit.update();
         orbit.enableDamping = true;
@@ -612,22 +745,48 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
       controller.abort();
       cleanup?.();
     };
-  }, [retry]);
+  }, [retry, mount]);
 
-  return (
+  const surface = (
     <section
       ref={viewer}
-      className={`dt-viewer ${fullscreen ? "dt-viewer-fullscreen" : ""}`}
+      className={`dt-viewer ${fullscreen ? "dt-viewer-fullscreen" : ""} ${compact && detailsOpen ? "dt-viewer-details-open" : ""}`}
+      role={fullscreen ? "dialog" : undefined}
+      aria-modal={fullscreen ? true : undefined}
       aria-label="Visualização do dessalinizador"
     >
       <div className="dt-viewer-top">
         <span>
-          <Box size={15} /> Dessalinizador solar <b>r33</b>
+          <Box size={15} /> Dessalinizador solar
         </span>
         <span className="dt-viewer-badge">
           {status === "ready" ? "Modelo interativo" : "Referência do equipamento"}
         </span>
+        {fullscreen && (
+          <button
+            ref={closeButton}
+            className="dt-close-expanded"
+            aria-label="Fechar visualização expandida"
+            onClick={() => void closeExpanded()}
+          >
+            <X size={20} />
+          </button>
+        )}
       </div>
+      {fullscreen && compact && (
+        <div
+          className="dt-mobile-viewer-tabs"
+          role="group"
+          aria-label="Conteúdo da visualização expandida"
+        >
+          <button aria-pressed={!detailsOpen} onClick={() => setDetailsOpen(false)}>
+            Modelo 3D
+          </button>
+          <button aria-pressed={detailsOpen} onClick={() => setDetailsOpen(true)}>
+            Detalhes
+          </button>
+        </div>
+      )}
       <div
         ref={host}
         className="dt-canvas"
@@ -695,19 +854,8 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
             ref={callout}
             className={`dt-component-callout dt-callout-${side} ${focused ? "dt-callout-focused" : ""}`}
             aria-label="Detalhes do componente em tela cheia"
+            tabIndex={0}
           >
-            <ComponentCallout
-              selected={selected}
-              telemetry={telemetry}
-              touring={touring}
-              remaining={remaining}
-              position={available.indexOf(selected) + 1}
-              count={available.length}
-              onPause={() => actions.current?.focus(selected)}
-              onResume={() => actions.current?.rotate(true)}
-              onNext={nextComponent}
-              onReset={() => actions.current?.reset()}
-            />
             <label className="dt-callout-select">
               Selecionar componente
               <select
@@ -722,6 +870,45 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
                 ))}
               </select>
             </label>
+            {compact && (
+              <div className="dt-mobile-component-summary">
+                {isSensor(selected) ? (
+                  <strong>
+                    {formatValue(telemetry.readings[selected])}
+                    <small>{selected === "gateway" ? "" : sensors[selected].unit}</small>
+                  </strong>
+                ) : (
+                  <span>Componente do equipamento</span>
+                )}
+                <span>
+                  {telemetry.mode === "demo"
+                    ? "DEMO · Simulação"
+                    : isSensor(selected)
+                      ? healthLabels[telemetry.health[selected]]
+                      : "Sem medição dedicada"}
+                </span>
+              </div>
+            )}
+            <div className="dt-full-component-details">
+              <ComponentCallout
+                selected={selected}
+                telemetry={telemetry}
+                touring={touring}
+                remaining={remaining}
+                position={available.indexOf(selected) + 1}
+                count={available.length}
+                onPause={() => actions.current?.focus(selected)}
+                onResume={() => {
+                  setDetailsOpen(false);
+                  actions.current?.rotate(true);
+                }}
+                onNext={nextComponent}
+                onReset={() => {
+                  setDetailsOpen(false);
+                  actions.current?.reset();
+                }}
+              />
+            </div>
           </div>
         </>
       )}
@@ -732,7 +919,7 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
       )}
       <div className="dt-viewer-bottom">
         <span>
-          <MousePointer2 size={14} /> Arraste para girar · clique nas peças
+          <MousePointer2 size={14} /> Arraste para girar · toque ou clique nas peças
         </span>
         <div className="dt-camera-controls">
           <button
@@ -787,26 +974,34 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
           <button
             onClick={async () => {
               setFullscreenError("");
+              if (fullscreen) {
+                await closeExpanded();
+                return;
+              }
+              returnFocus.current =
+                document.activeElement instanceof HTMLElement ? document.activeElement : null;
+              setDetailsOpen(false);
+              setFocused(false);
+              if (mountPoint.current && viewer.current)
+                mountPoint.current.style.height = `${viewer.current.getBoundingClientRect().height}px`;
+              if (compact) {
+                actions.current?.reset();
+                setFullscreen(true);
+                return;
+              }
               try {
-                if (document.fullscreenElement === viewer.current) {
-                  await document.exitFullscreen();
-                  if (!document.fullscreenElement) {
-                    setFullscreen(false);
-                    actions.current?.reset();
-                  }
-                } else if (viewer.current?.requestFullscreen)
-                  await viewer.current.requestFullscreen();
-                else
-                  setFullscreenError(
-                    "Este navegador não oferece tela cheia. Use os controles de câmera e o painel de sensores.",
-                  );
+                if (viewer.current?.requestFullscreen) await viewer.current.requestFullscreen();
+                else {
+                  setFullscreen(true);
+                  actions.current?.rotate(true);
+                }
               } catch {
-                setFullscreenError(
-                  "Não foi possível entrar em tela cheia. Verifique a permissão de tela cheia do navegador.",
-                );
+                setFullscreen(true);
+                actions.current?.rotate(true);
               }
             }}
             aria-label="Alternar tela cheia"
+            aria-pressed={fullscreen}
             title="Tela cheia"
           >
             <Maximize2 size={17} />
@@ -814,5 +1009,11 @@ export default function ModelViewer({ selected, onSelect, onInspect, telemetry }
         </div>
       </div>
     </section>
+  );
+  return (
+    <>
+      <div ref={mountPoint} className="dt-viewer-slot" />
+      {mount && createPortal(surface, mount)}
+    </>
   );
 }

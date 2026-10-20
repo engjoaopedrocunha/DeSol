@@ -4,6 +4,7 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { predictDailyYield } from "./lib/piml-engine";
 import { handleDigitalTwinApi } from "./lib/digital-twin-proxy.server";
+import { handleEsp32Api } from "./lib/esp32-proxy.server";
 import {
   addReading,
   addReadingsBatch,
@@ -60,6 +61,8 @@ export default {
     try {
       const twinResponse = await handleDigitalTwinApi(request, env);
       if (twinResponse) return twinResponse;
+      const esp32Response = await handleEsp32Api(request, env);
+      if (esp32Response) return esp32Response;
       const apiResponse = await handleTelemetryApi(request);
       if (apiResponse) return apiResponse;
       const handler = await getServerEntry();

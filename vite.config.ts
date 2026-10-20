@@ -19,6 +19,7 @@ export default defineConfig({
           "DESOL_DEVICE_ID",
           "DESOL_API_TOKEN",
           "DESOL_SAMPLE_INTERVAL_SECONDS",
+          "DESOL_ESP32_BASE_URL",
         ]) {
           if (process.env[name] === undefined && values[name] !== undefined)
             process.env[name] = values[name];

@@ -50,4 +50,6 @@ bun run test:e2e
 
 Para usar o Chromium já instalado no Fedora: `CHROMIUM_PATH=/usr/bin/chromium bun run test:e2e` (ajuste o caminho ao executável disponível).
 
-Para telemetria real, copie `.env.example` para `.env.local`, configure o backend e reinicie o servidor. Tokens ficam somente no backend. Consulte [a documentação completa de integração](docs/digital-twin.md) para contratos, variáveis, saúde, testes e pendências de hardware.
+O cartão ESP32 aceita o JSON do [sketch original](firmware/desol_esp32/desol_esp32.ino), sem alterar a pasta `firmware`. Configure `DESOL_ESP32_BASE_URL=http://<IP-da-placa>` em `.env.local`, reinicie o servidor e abra o painel local. Consulte o [guia de integração e execução](docs/esp32-integration.md). O horário exibido é o de recebimento pelo servidor; o sketch não fornece a idade da medição. O site hospedado precisa de um gateway/backend para alcançar os dados da rede privada.
+
+Para telemetria por backend HTTPS, configure `.env.local` conforme [a documentação completa do gêmeo digital](docs/digital-twin.md). Tokens ficam somente no backend.

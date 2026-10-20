@@ -52,6 +52,7 @@ import {
 import { overviewDisplayState, sensorDisplayState } from "./dashboard-presentation";
 import { HistoryChart, Sparkline } from "./TelemetryCharts";
 import { useDigitalTelemetry } from "./use-telemetry";
+import { Esp32TelemetryPanel } from "./Esp32TelemetryPanel";
 import type { SceneReport } from "./ModelViewer";
 import LegacyTelemetryPanel from "./LegacyTelemetryPanel";
 
@@ -245,6 +246,7 @@ export default function DigitalTwinDashboard() {
             Retomar API real
           </button>
         )}
+        <Esp32TelemetryPanel />
         <div className="dt-metrics" aria-label="Sensores do equipamento">
           {sensorIds.map((id) => {
             const Icon = sensorIcons[id];

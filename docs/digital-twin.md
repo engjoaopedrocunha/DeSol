@@ -30,6 +30,14 @@
 
 A API anterior tem um contrato diferente: reservatório em porcentagem e produção acumulada, sem os quatro registros padronizados, eventos ou comprovação de hardware. Por isso a integração r33 usa um adaptador próprio e preserva a API anterior, em vez de fabricar conversões ou tratar suas fixtures como dados reais.
 
+## ESP32 direto na rede local
+
+O cartão aceita o JSON do [sketch original enviado](../firmware/desol_esp32/desol_esp32.ino), mantendo a pasta `firmware` intacta. O adaptador valida apenas os campos que o sketch publica e acrescenta horário de recebimento pelo servidor. Não inventa versão, identificação, sinal Wi-Fi ou idade da medição. A página de monitoramento do próprio ESP32 continua em `http://<IP-do-ESP32>/`. Consulte o [guia completo de integração](esp32-integration.md).
+
+O cartão de telemetria local lê `/api/dados`, servido pela placa. Para configurar, informe `DESOL_ESP32_BASE_URL=http://<IPv4 privado do ESP32>` em `.env.local` e reinicie o servidor Vite. O computador servidor e a placa precisam estar na mesma rede; o cliente consulta `/api/esp32/telemetry` no servidor do próprio projeto, que faz a ponte com a placa. O servidor aceita apenas HTTP em IPv4 privado e confere formato e tamanho da resposta. A interface atualiza a consulta a cada 2 segundos após sucesso, tenta novamente com espera progressiva após falhas e descarta a resposta anterior após erro ou 10 segundos sem renovação. Receber uma resposta não comprova a idade da amostra do sensor. Não há autenticação nesse firmware local; use somente uma rede confiável.
+
+O cartão local fica visivelmente separado de DEMO e da API r33 porque temperatura, distância, nível percentual, sinais pH/TDS e comando da bomba não podem ser adaptados aos quatro sensores r33 sem conversões ou dados físicos inexistentes. O gêmeo, histórico, mapas e outros painéis continuam recebendo apenas os contratos configurados para eles. O firmware está no [sketch único do ESP32](../firmware/desol_esp32/desol_esp32.ino), com credenciais e configurações no próprio arquivo.
+
 ## Configuração real (opcional)
 
 Sem `DESOL_API_BASE_URL`, o modo é DEMO e nenhum serviço externo é consultado. `GET /api/digital-twin/config` expõe somente modo, identificador de dispositivo e intervalo esperado opcional.
